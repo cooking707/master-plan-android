@@ -396,7 +396,7 @@ fun UpdateCard(model: AppModel) {
         runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(AppModel.DOWNLOAD_URL))) }
     }, color = UI.green.copy(alpha = 0.12f)) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("새 버전 $v 이 있어요", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = UI.ink)
+            Text("새 버전($v)이 나왔어요", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = UI.ink)
             Text("눌러서 받은 파일을 설치하면 업데이트돼요. 할 일과 설정은 그대로 남아요.", fontSize = 13.sp, color = UI.secondary)
         }
     }

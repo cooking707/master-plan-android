@@ -84,7 +84,7 @@ object Defaults {
 
 /** 앱·백그라운드 작업이 같이 쓰는 저장소(앱 내부 파일 하나). */
 object Store {
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; coerceInputValues = true }
     private val lock = Any()
     @Volatile private var cache: AppData? = null
 
