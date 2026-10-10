@@ -40,7 +40,7 @@ object WallpaperRenderer {
         Template.Calendar -> listOf(Block(Kind.YearBar), Block(Kind.Month, lanes = 2))
         Template.Timeline -> listOf(Block(Kind.Week, lanes = 2), Block(Kind.Timeline, rows = 15))
         // 일정이 많은 사람용: 이번 주 하루 5줄, 큰 막대
-        Template.TodayYear -> listOf(Block(Kind.YearDots), Block(Kind.Week, lanes = 5, big = true), Block(Kind.Timeline, rows = 7))
+        Template.TodayYear -> listOf(Block(Kind.YearDots), Block(Kind.Week, lanes = 5, big = true), Block(Kind.Timeline, rows = 14))
         Template.Checklist -> listOf(Block(Kind.Week, lanes = 2), Block(Kind.Checklist, rows = 11))
     }
 
@@ -163,7 +163,17 @@ object WallpaperRenderer {
     private fun timelineSplit(snap: Snapshot, maxRows: Int): Triple<List<Snapshot.Row>, List<PlanItem>, Int> {
         val top = snap.todayRows()
         val bottom = snap.undatedTodos
-        val topShown = top.take(maxRows)
+        // 일정이 많아도 직접 넣은 할 일이 밀려나지 않게 최대 3줄은 할 일 몫으로 남긴다.
+        val reserve = min(bottom.size, 3)
+        val room = max(0, maxRows - reserve)
+        var rows = top
+        if (rows.size > room) {
+            // 자리가 모자라면 이미 끝난 일정부터 뺀다.
+            val ended = rows.filter { it.item.isEvent && !it.item.allDay && it.item.end != null && !it.item.end.isAfter(snap.now) }
+            val drop = ended.take(rows.size - room).toSet()
+            rows = rows.filter { it !in drop }
+        }
+        val topShown = rows.take(room)
         val bottomShown = bottom.take(max(0, maxRows - topShown.size))
         return Triple(topShown, bottomShown, top.size + bottom.size - topShown.size - bottomShown.size)
     }
