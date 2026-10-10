@@ -21,6 +21,9 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,8 +35,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -59,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.achieverlee.masterplan.AppModel
 import com.achieverlee.masterplan.Background
+import com.achieverlee.masterplan.CalendarInfo
 import com.achieverlee.masterplan.Box as PlanBox
 import com.achieverlee.masterplan.Defaults
 import com.achieverlee.masterplan.K
@@ -161,6 +163,7 @@ fun LockScreenTab(model: AppModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ScreenTitle("잠금화면")
+        UpdateCard(model)
         Card(Modifier.fillMaxWidth(), radius = 30, padding = 14) {
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Box(Modifier.width(130.dp).clip(RoundedCornerShape(18.dp))) {
@@ -249,12 +252,18 @@ fun SettingsScreen(model: AppModel, onRequestPermission: () -> Unit, onBattery: 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
         ScreenTitle("설정")
+        UpdateCard(model)
         if (!model.hasPermission) PermissionCard(onRequestPermission)
 
         Text("할 일 네 칸", fontWeight = FontWeight.SemiBold, color = UI.ink, modifier = Modifier.padding(start = 4.dp))
         Text("칸마다 캘린더를 연결하면 그 캘린더의 오늘 일정이 그 칸의 할 일로 들어와요. 칸 이름과 색은 캘린더를 따라가요. 체크는 이 앱 안에서만 남고 캘린더 일정은 바뀌지 않아요.",
             fontSize = 13.sp, color = UI.secondary, modifier = Modifier.padding(horizontal = 4.dp))
         model.data.boxes.forEachIndexed { i, box -> BoxSettings(model, i, box) }
+
+        Text("보일 캘린더", fontWeight = FontWeight.SemiBold, color = UI.ink, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
+        Text("끈 캘린더는 잠금화면과 캘린더 탭에 나오지 않아요(공휴일·생일 등).", fontSize = 13.sp, color = UI.secondary,
+            modifier = Modifier.padding(horizontal = 4.dp))
+        VisibleCalendars(model)
 
         Text("자동 갱신이 멈출 때", fontWeight = FontWeight.SemiBold, color = UI.ink, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
         Card(Modifier.fillMaxWidth()) {
@@ -267,7 +276,7 @@ fun SettingsScreen(model: AppModel, onRequestPermission: () -> Unit, onBattery: 
                     fontSize = 13.sp, color = UI.secondary)
             }
         }
-        Text("마스터 플랜 · 안드로이드판", fontSize = 12.sp, color = UI.secondary, modifier = Modifier.padding(start = 4.dp))
+        Text("마스터 플랜 · 안드로이드판 ${model.versionName}", fontSize = 12.sp, color = UI.secondary, modifier = Modifier.padding(start = 4.dp))
         Spacer(Modifier.height(40.dp))
     }
 }
@@ -291,32 +300,16 @@ fun BoxSettings(model: AppModel, i: Int, box: PlanBox) {
                     TextButton(onClick = { model.setBox(i, box.copy(name = name.trim())) }) { Text("저장") }
                 }
             }
-            Box {
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(UI.field).clickable { menu = true }
-                    .padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("연결한 캘린더", fontSize = 14.sp, color = UI.secondary, modifier = Modifier.weight(1f))
-                    Text(cal?.name ?: "연결 안 함", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = UI.ink)
-                }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("연결 안 함") }, onClick = {
-                        menu = false
-                        model.setBox(i, box.copy(calendarId = null, color = Defaults.boxColors[i]))
-                    })
-                    model.calendars.forEach { c ->
-                        DropdownMenuItem(
-                            leadingIcon = { Box(Modifier.size(12.dp).clip(CircleShape).background(c.color.c())) },
-                            text = {
-                                Column {
-                                    Text(c.name)
-                                    Text(c.account, fontSize = 11.sp, color = UI.secondary)
-                                }
-                            },
-                            onClick = {
-                                menu = false
-                                model.setBox(i, box.copy(calendarId = c.id, name = c.name, color = c.color))
-                            },
-                        )
-                    }
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(UI.field).clickable { menu = true }
+                .padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("연결한 캘린더", fontSize = 14.sp, color = UI.secondary, modifier = Modifier.weight(1f))
+                Text(cal?.name ?: "연결 안 함", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = UI.ink)
+            }
+            if (menu) {
+                CalendarPicker(model, selected = box.calendarId, onDismiss = { menu = false }) { c ->
+                    menu = false
+                    if (c == null) model.setBox(i, box.copy(calendarId = null, color = Defaults.boxColors[i]))
+                    else model.setBox(i, box.copy(calendarId = c.id, name = c.name, color = c.color))
                 }
             }
             if (cal == null) {
@@ -329,6 +322,82 @@ fun BoxSettings(model: AppModel, i: Int, box: PlanBox) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** 캘린더가 많아도 스크롤되는 고르기 창. 계정별로 묶는다. */
+@Composable
+fun CalendarPicker(model: AppModel, selected: Long?, onDismiss: () -> Unit, onPick: (CalendarInfo?) -> Unit) {
+    val groups = model.calendars.groupBy { it.account }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = UI.card,
+        title = { Text("연결할 캘린더", fontWeight = FontWeight.Bold) },
+        text = {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp)) {
+                item {
+                    PickerRow(null, "연결 안 함", null, selected == null) { onPick(null) }
+                }
+                groups.forEach { (account, list) ->
+                    item {
+                        Text(account, fontSize = 12.sp, color = UI.secondary, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
+                    }
+                    items(list, key = { it.id }) { c ->
+                        PickerRow(c.color, c.name, null, selected == c.id) { onPick(c) }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("닫기") } },
+    )
+}
+
+@Composable
+private fun PickerRow(color: Int?, name: String, sub: String?, selected: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (selected) UI.field else Color.Transparent)
+        .clickable { onClick() }.padding(horizontal = 10.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(14.dp).clip(CircleShape).background(color?.c() ?: UI.field))
+        Spacer(Modifier.width(12.dp))
+        Text(name, fontSize = 15.sp, color = UI.ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (selected) Icon(Icons.Filled.Check, null, tint = UI.green, modifier = Modifier.size(18.dp))
+    }
+}
+
+/** 잠금화면·캘린더 탭에 보일 캘린더. 공휴일·생일처럼 필요 없는 캘린더를 끈다. */
+@Composable
+fun VisibleCalendars(model: AppModel) {
+    Card(Modifier.fillMaxWidth(), padding = 12) {
+        Column {
+            if (model.calendars.isEmpty()) Text("캘린더가 없어요", color = UI.secondary, fontSize = 14.sp)
+            model.calendars.groupBy { it.account }.forEach { (account, list) ->
+                Text(account, fontSize = 12.sp, color = UI.secondary, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 2.dp))
+                list.forEach { c ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(12.dp).clip(CircleShape).background(c.color.c()))
+                        Spacer(Modifier.width(10.dp))
+                        Text(c.name, fontSize = 15.sp, color = UI.ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Switch(checked = c.id !in model.data.hiddenCalendars, onCheckedChange = { model.setCalendarVisible(c.id, it) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 새 버전이 올라와 있으면 보이는 카드. 누르면 같은 설치 주소를 연다. */
+@Composable
+fun UpdateCard(model: AppModel) {
+    val ctx = LocalContext.current
+    val v = model.newVersion ?: return
+    Card(Modifier.fillMaxWidth().clickable {
+        runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(AppModel.DOWNLOAD_URL))) }
+    }, color = UI.green.copy(alpha = 0.12f)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("새 버전 $v 이 있어요", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = UI.ink)
+            Text("눌러서 받은 파일을 설치하면 업데이트돼요. 할 일과 설정은 그대로 남아요.", fontSize = 13.sp, color = UI.secondary)
         }
     }
 }

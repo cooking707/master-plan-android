@@ -27,12 +27,14 @@ object WallpaperRenderer {
     private const val SECONDARY = 0xFF8E8E96.toInt()
     private const val FAINT = 0xFF3A3B42.toInt()
 
-    enum class Kind { YearDots, YearBar, Week, Matrix, Month, Timeline, Checklist }
+    enum class Kind { YearDots, YearBar, Week, Matrix, Month, Timeline, Checklist, Agenda }
 
     data class Block(val kind: Kind, var rows: Int = 0, var lanes: Int = 2)
 
     fun blocks(t: Template): List<Block> = when (t) {
         Template.CeoPick -> listOf(Block(Kind.YearDots), Block(Kind.Matrix, rows = 3))
+        // rows = 보일 일정 수, lanes = 아래쪽 할 일 줄 수
+        Template.AgendaYear -> listOf(Block(Kind.YearDots), Block(Kind.Agenda, rows = 10, lanes = 3))
         Template.Matrix -> listOf(Block(Kind.Week, lanes = 2), Block(Kind.Matrix, rows = 3))
         Template.Calendar -> listOf(Block(Kind.YearBar), Block(Kind.Month, lanes = 2))
         Template.Timeline -> listOf(Block(Kind.Week, lanes = 2), Block(Kind.Timeline, rows = 15))
@@ -49,6 +51,10 @@ object WallpaperRenderer {
     private fun fit(blocks: List<Block>, snap: Snapshot, availPt: Float): List<Block> {
         fun used() = blocks.sumOf { height(it, snap).toDouble() }.toFloat() + GAP * (blocks.size - 1)
         for (b in blocks.filter { it.kind == Kind.Timeline || it.kind == Kind.Checklist }) {
+            while (b.rows > 3 && used() > availPt) b.rows--
+        }
+        for (b in blocks.filter { it.kind == Kind.Agenda }) {
+            while (b.lanes > 0 && used() > availPt) b.lanes--
             while (b.rows > 3 && used() > availPt) b.rows--
         }
         for (b in blocks.filter { it.kind == Kind.Matrix }) {
@@ -116,6 +122,12 @@ object WallpaperRenderer {
             14f + 24f + top.size * 23f + (if (bottom.isNotEmpty()) 10f + bottom.size * 23f else 0f) +
                 (if (hidden > 0) 20f else 0f) + 10f + (if (top.isEmpty() && bottom.isEmpty()) 24f else 0f)
         }
+        Kind.Agenda -> {
+            val a = agendaSplit(snap, b.rows, b.lanes)
+            14f + 26f + a.allDay.size * 26f + a.timed.size * 40f +
+                (if (a.todos.isNotEmpty()) 12f + 18f + a.todos.size * 22f else 0f) +
+                (if (a.hiddenEvents > 0) 20f else 0f) + 10f + (if (a.allDay.isEmpty() && a.timed.isEmpty()) 26f else 0f)
+        }
         Kind.Checklist -> {
             val list = snap.checklist
             val shown = min(list.size, b.rows)
@@ -124,6 +136,27 @@ object WallpaperRenderer {
     }
 
     private fun matrixCardH(rows: Int) = 12f + 24f + 8f + rows * 21f + 18f + 8f
+
+    class AgendaParts(val allDay: List<PlanItem>, val timed: List<PlanItem>, val hiddenEvents: Int,
+                      val todos: List<PlanItem>, val todoTotal: Int)
+
+    /** 오늘 일정(종일 먼저, 시간순)과 오늘 할 일. 일정이 많으면 지난 일정부터 뺀다. */
+    private fun agendaSplit(snap: Snapshot, maxEvents: Int, maxTodos: Int): AgendaParts {
+        val events = snap.dayItems(snap.today).filter { it.isEvent }
+        val allDay = events.filter { it.allDay }
+        var timed = events.filter { !it.allDay }
+        val room = maxOf(0, maxEvents - allDay.size)
+        if (timed.size > room) {
+            // 끝난 일정을 앞에서부터 덜어 내고, 그래도 많으면 뒤를 자른다.
+            val past = timed.count { it.end != null && !it.end.isAfter(snap.now) }
+            val drop = minOf(past, timed.size - room)
+            timed = timed.drop(drop).take(room)
+        }
+        val shownAllDay = allDay.take(maxEvents)
+        val hidden = events.size - shownAllDay.size - timed.size
+        val todos = snap.checklist.filter { !it.fromCalendar }
+        return AgendaParts(shownAllDay, timed, hidden, todos.take(maxTodos), todos.size)
+    }
 
     private fun timelineSplit(snap: Snapshot, maxRows: Int): Triple<List<Snapshot.Row>, List<PlanItem>, Int> {
         val top = snap.todayRows()
@@ -169,6 +202,7 @@ object WallpaperRenderer {
                 Kind.Month -> month(snap, x, y, w, h, b.lanes)
                 Kind.Timeline -> timeline(snap, x, y, w, h, b.rows)
                 Kind.Checklist -> checklist(snap, x, y, w, h, b.rows)
+                Kind.Agenda -> agenda(snap, x, y, w, h, b.rows, b.lanes)
             }
         }
 
@@ -398,6 +432,85 @@ object WallpaperRenderer {
                 return if (days <= 1) "하루 종일" else "${s.monthValue}/${s.dayOfMonth} → ${e.minusDays(1).monthValue}/${e.minusDays(1).dayOfMonth}"
             }
             return "${K.time(s)}–${K.time(e)}"
+        }
+
+        private fun duration(s: java.time.LocalDateTime, e: java.time.LocalDateTime): String {
+            val m = ChronoUnit.MINUTES.between(s, e)
+            return when {
+                m < 60 -> "${m}분"
+                m % 60 == 0L -> "${m / 60}시간"
+                else -> "${m / 60}시간 ${m % 60}분"
+            }
+        }
+
+        /** 미팅이 많은 날을 위한 넓은 오늘 일정. 지난 일정은 흐리게, 진행 중인 일정은 표시한다. */
+        fun agenda(snap: Snapshot, x: Float, y: Float, w: Float, h: Float, rows: Int, todoRows: Int) {
+            card(x, y, w, h)
+            val a = agendaSplit(snap, rows, todoRows)
+            val count = snap.dayItems(snap.today).count { it.isEvent }
+            header(K.fmt("M월 d일 EEEE", snap.today), "일정 $count", x, y, w)
+            var ry = y + 14f + 26f
+            if (a.allDay.isEmpty() && a.timed.isEmpty()) {
+                text("오늘 일정이 없어요", x + 14f, ry + 13f, tp(13f, SECONDARY))
+                ry += 26f
+            }
+            for (e in a.allDay) {
+                val cy = ry + 13f
+                fill.color = (e.color and 0x00FFFFFF) or 0x40000000
+                c.drawRoundRect(RectF(x + 14f, ry + 2f, x + w - 14f, ry + 24f), 6f, 6f, fill)
+                fill.color = e.color
+                c.drawRoundRect(RectF(x + 14f, ry + 2f, x + 17.5f, ry + 24f), 2f, 2f, fill)
+                text("종일", x + 24f, cy, tp(10f, SECONDARY, true))
+                text(e.title, x + 56f, cy, tp(13f, TEXT, true), maxW = w - 56f - 18f)
+                ry += 26f
+            }
+            val timeW = 62f
+            for (e in a.timed) {
+                val s = e.start ?: continue
+                val end = e.end ?: s
+                val past = !end.isAfter(snap.now)
+                val live = !s.isAfter(snap.now) && end.isAfter(snap.now)
+                val main = if (past) SECONDARY else TEXT
+                text(K.time(s), x + 14f, ry + 13f, tp(11.5f, main, true))
+                text(K.time(end), x + 14f, ry + 28f, tp(9.5f, SECONDARY))
+                fill.color = if (past) (e.color and 0x00FFFFFF) or 0x66000000 else e.color
+                c.drawRoundRect(RectF(x + 14f + timeW, ry + 4f, x + 14f + timeW + 3.5f, ry + 36f), 2f, 2f, fill)
+                val tx = x + 14f + timeW + 12f
+                val badge = if (live) "진행 중" else null
+                val bp = tp(9.5f, TEXT, true)
+                val bw = if (badge != null) width(badge, bp) + 12f else 0f
+                text(e.title, tx, ry + 13f, tp(14f, main, true), maxW = w - (tx - x) - 14f - bw - 4f)
+                text(duration(s, end), tx, ry + 28f, tp(10f, SECONDARY))
+                if (badge != null) {
+                    fill.color = 0xFFFF5A4E.toInt()
+                    c.drawRoundRect(RectF(x + w - 14f - bw, ry + 5f, x + w - 14f, ry + 21f), 8f, 8f, fill)
+                    text(badge, x + w - 14f - bw / 2, ry + 13f, bp, align = Paint.Align.CENTER)
+                }
+                ry += 40f
+            }
+            if (a.hiddenEvents > 0) {
+                text("+${a.hiddenEvents}개 일정 더", x + 14f + timeW + 12f, ry + 8f, tp(10.5f, SECONDARY))
+                ry += 20f
+            }
+            if (a.todos.isNotEmpty()) {
+                fill.color = 0x26FFFFFF
+                c.drawRect(x + 14f, ry + 5f, x + w - 14f, ry + 5.5f, fill)
+                ry += 12f
+                val more = if (a.todoTotal > a.todos.size) "  +${a.todoTotal - a.todos.size}" else ""
+                text("할 일 ${a.todoTotal}$more", x + 14f, ry + 9f, tp(10.5f, SECONDARY, true))
+                ry += 18f
+                for (t in a.todos) {
+                    stroke.color = t.color
+                    stroke.strokeWidth = 1.5f
+                    c.drawCircle(x + 14f + 5.5f, ry + 11f, 5.5f, stroke)
+                    val due = t.dueLabel(snap.today)
+                    val dp = tp(10f, t.color, true)
+                    val dw = if (due.isEmpty()) 0f else width(due, dp) + 6f
+                    text(t.title, x + 32f, ry + 11f, tp(12.5f, TEXT), maxW = w - 32f - 14f - dw)
+                    if (due.isNotEmpty()) text(due, x + w - 14f, ry + 11f, dp, align = Paint.Align.RIGHT)
+                    ry += 22f
+                }
+            }
         }
 
         fun checklist(snap: Snapshot, x: Float, y: Float, w: Float, h: Float, rows: Int) {

@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         model.refresh()
+        model.checkUpdate()
     }
 
     /** 앱을 나가면 잠금화면을 다시 그린다(아이폰판의 '앱 닫힘 자동화'에 해당). */
@@ -70,6 +71,35 @@ class AppModel(val ctx: Context) {
         private set
     var hasPermission by mutableStateOf(CalendarRepo.hasPermission(ctx))
         private set
+
+    /** 릴리스에 올라온 더 새 버전 이름(없으면 null). */
+    var newVersion by mutableStateOf<String?>(null)
+        private set
+    private val versionCode: Long = runCatching {
+        val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+        if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
+    }.getOrDefault(0L)
+    val versionName: String = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "" }.getOrDefault("")
+
+    /** GitHub 최신 릴리스(태그 v1.0.N, N = versionCode)와 비교한다. 실패하면 조용히 넘어간다. */
+    fun checkUpdate() {
+        Thread {
+            runCatching {
+                val c = java.net.URL("https://api.github.com/repos/cooking707/master-plan-android/releases/latest").openConnection() as java.net.HttpURLConnection
+                c.connectTimeout = 8000
+                c.readTimeout = 8000
+                c.setRequestProperty("Accept", "application/vnd.github+json")
+                val body = c.inputStream.bufferedReader().readText()
+                val tag = Regex("\"tag_name\"\\s*:\\s*\"v([0-9.]+)\"").find(body)?.groupValues?.get(1) ?: return@runCatching
+                val n = tag.substringAfterLast('.').toLongOrNull() ?: return@runCatching
+                newVersion = if (n > versionCode) tag else null
+            }
+        }.start()
+    }
+
+    fun setCalendarVisible(id: Long, visible: Boolean) = change { d ->
+        d.copy(hiddenCalendars = if (visible) d.hiddenCalendars - id else d.hiddenCalendars + id)
+    }
 
     fun refresh() {
         hasPermission = CalendarRepo.hasPermission(ctx)
@@ -150,5 +180,6 @@ class AppModel(val ctx: Context) {
 
     companion object {
         val permission = Manifest.permission.READ_CALENDAR
+        const val DOWNLOAD_URL = "https://github.com/cooking707/master-plan-android/releases/latest/download/master-plan.apk"
     }
 }
