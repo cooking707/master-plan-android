@@ -30,7 +30,7 @@ object WallpaperRenderer {
     enum class Kind { YearDots, YearBar, Week, Matrix, Month, Timeline, Checklist, Agenda }
 
     /** big: 이번 주 칸을 크게(일정 막대 높이·글자 키움). */
-    data class Block(val kind: Kind, var rows: Int = 0, var lanes: Int = 2, val big: Boolean = false)
+    data class Block(val kind: Kind, var rows: Int = 0, var lanes: Int = 2, val big: Boolean = false, val todosOnly: Boolean = false)
 
     fun blocks(t: Template): List<Block> = when (t) {
         Template.CeoPick -> listOf(Block(Kind.YearDots), Block(Kind.Matrix, rows = 3))
@@ -40,7 +40,7 @@ object WallpaperRenderer {
         Template.Calendar -> listOf(Block(Kind.YearBar), Block(Kind.Month, lanes = 2))
         Template.Timeline -> listOf(Block(Kind.Week, lanes = 2), Block(Kind.Timeline, rows = 15))
         // 일정이 많은 사람용: 이번 주 하루 5줄, 큰 막대
-        Template.TodayYear -> listOf(Block(Kind.YearDots), Block(Kind.Week, lanes = 5, big = true), Block(Kind.Timeline, rows = 14))
+        Template.TodayYear -> listOf(Block(Kind.YearDots), Block(Kind.Week, lanes = 5, big = true), Block(Kind.Timeline, rows = 14, todosOnly = true))
         Template.Checklist -> listOf(Block(Kind.Week, lanes = 2), Block(Kind.Checklist, rows = 11))
     }
 
@@ -120,7 +120,7 @@ object WallpaperRenderer {
         Kind.Matrix -> 2 * matrixCardH(b.rows) + GAP
         Kind.Month -> 14f + 22f + 18f + monthWeeks(snap) * (24f + b.lanes * 14f) + 10f
         Kind.Timeline -> {
-            val (top, bottom, hidden) = timelineSplit(snap, b.rows)
+            val (top, bottom, hidden) = timelineSplit(snap, b.rows, b.todosOnly)
             14f + 24f + top.size * 23f + (if (bottom.isNotEmpty()) 10f + bottom.size * 23f else 0f) +
                 (if (hidden > 0) 20f else 0f) + 10f + (if (top.isEmpty() && bottom.isEmpty()) 24f else 0f)
         }
@@ -160,8 +160,9 @@ object WallpaperRenderer {
         return AgendaParts(shownAllDay, timed, hidden, todos.take(maxTodos), todos.size)
     }
 
-    private fun timelineSplit(snap: Snapshot, maxRows: Int): Triple<List<Snapshot.Row>, List<PlanItem>, Int> {
-        val top = snap.todayRows()
+    /** todosOnly: 일정은 위 '이번 주'에서 보므로 오늘 카드에는 할 일만 둔다. */
+    private fun timelineSplit(snap: Snapshot, maxRows: Int, todosOnly: Boolean = false): Triple<List<Snapshot.Row>, List<PlanItem>, Int> {
+        val top = snap.todayRows().filter { !todosOnly || (!it.item.isEvent && !it.item.fromCalendar) }
         val bottom = snap.undatedTodos
         // 일정이 많아도 직접 넣은 할 일이 밀려나지 않게 최대 3줄은 할 일 몫으로 남긴다.
         val reserve = min(bottom.size, 3)
@@ -212,7 +213,7 @@ object WallpaperRenderer {
                 Kind.Week -> week(snap, x, y, w, h, b.lanes, b.big)
                 Kind.Matrix -> matrix(snap, x, y, w, b.rows)
                 Kind.Month -> month(snap, x, y, w, h, b.lanes)
-                Kind.Timeline -> timeline(snap, x, y, w, h, b.rows)
+                Kind.Timeline -> timeline(snap, x, y, w, h, b.rows, b.todosOnly)
                 Kind.Checklist -> checklist(snap, x, y, w, h, b.rows)
                 Kind.Agenda -> agenda(snap, x, y, w, h, b.rows, b.lanes)
             }
@@ -403,14 +404,14 @@ object WallpaperRenderer {
             text(badge, x + w - 14f - bw / 2, y + 14f + 11f, bp, align = Paint.Align.CENTER)
         }
 
-        fun timeline(snap: Snapshot, x: Float, y: Float, w: Float, h: Float, rows: Int) {
+        fun timeline(snap: Snapshot, x: Float, y: Float, w: Float, h: Float, rows: Int, todosOnly: Boolean = false) {
             card(x, y, w, h)
-            val (top, bottom, hidden) = timelineSplit(snap, rows)
-            header(K.fmt("M월 d일 EEEE", snap.today), "${snap.todayRows().size + snap.undatedTodos.size}", x, y, w)
+            val (top, bottom, hidden) = timelineSplit(snap, rows, todosOnly)
+            header(K.fmt("M월 d일 EEEE", snap.today), "${top.size + bottom.size + hidden}", x, y, w)
             var ry = y + 14f + 24f + 11.5f
             val labelW = 52f
             if (top.isEmpty() && bottom.isEmpty()) {
-                text("오늘 일정과 할 일이 없어요", x + 14f, ry + 4f, tp(12.5f, SECONDARY))
+                text(if (todosOnly) "오늘 할 일이 없어요" else "오늘 일정과 할 일이 없어요", x + 14f, ry + 4f, tp(12.5f, SECONDARY))
             }
             for (row in top) {
                 text(row.label, x + 14f + labelW, ry, tp(9.5f, SECONDARY, true), align = Paint.Align.RIGHT)

@@ -38,7 +38,7 @@ enum class Template(val label: String, val subtitle: String) {
     Matrix("매트릭스", "이번 주와 네 칸"),
     Calendar("캘린더", "올해 진행과 한 달 달력"),
     Timeline("오늘 타임라인", "이번 주와 오늘 일정·할 일"),
-    TodayYear("오늘 + 연간 진행", "365개 점, 넓은 이번 주(하루 5줄), 오늘 타임라인"),
+    TodayYear("오늘 + 연간 진행", "365개 점, 넓은 이번 주(하루 5줄), 오늘 할 일"),
     Checklist("체크리스트", "이번 주와 오늘 할 일 목록"),
 }
 
