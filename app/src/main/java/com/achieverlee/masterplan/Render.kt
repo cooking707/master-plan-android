@@ -29,7 +29,8 @@ object WallpaperRenderer {
 
     enum class Kind { YearDots, YearBar, Week, Matrix, Month, Timeline, Checklist, Agenda }
 
-    data class Block(val kind: Kind, var rows: Int = 0, var lanes: Int = 2)
+    /** big: 이번 주 칸을 크게(일정 막대 높이·글자 키움). */
+    data class Block(val kind: Kind, var rows: Int = 0, var lanes: Int = 2, val big: Boolean = false)
 
     fun blocks(t: Template): List<Block> = when (t) {
         Template.CeoPick -> listOf(Block(Kind.YearDots), Block(Kind.Matrix, rows = 3))
@@ -38,7 +39,8 @@ object WallpaperRenderer {
         Template.Matrix -> listOf(Block(Kind.Week, lanes = 2), Block(Kind.Matrix, rows = 3))
         Template.Calendar -> listOf(Block(Kind.YearBar), Block(Kind.Month, lanes = 2))
         Template.Timeline -> listOf(Block(Kind.Week, lanes = 2), Block(Kind.Timeline, rows = 15))
-        Template.TodayYear -> listOf(Block(Kind.YearDots), Block(Kind.Week, lanes = 2), Block(Kind.Timeline, rows = 7))
+        // 일정이 많은 사람용: 이번 주 하루 5줄, 큰 막대
+        Template.TodayYear -> listOf(Block(Kind.YearDots), Block(Kind.Week, lanes = 5, big = true), Block(Kind.Timeline, rows = 7))
         Template.Checklist -> listOf(Block(Kind.Week, lanes = 2), Block(Kind.Checklist, rows = 11))
     }
 
@@ -114,7 +116,7 @@ object WallpaperRenderer {
     fun height(b: Block, snap: Snapshot): Float = when (b.kind) {
         Kind.YearDots -> 14f + 22f + 10f + 10 * 9.3f + 10f + 14f + 14f
         Kind.YearBar -> 14f + 22f + 12f + 8f + 10f + 14f + 14f
-        Kind.Week -> 12f + 12f + 5f + 24f + 6f + weekLanesUsed(snap, b.lanes) * 15f + 12f + 8f
+        Kind.Week -> 12f + 12f + 5f + 24f + 6f + weekLanesUsed(snap, b.lanes) * (if (b.big) 19f else 15f) + 12f + 8f
         Kind.Matrix -> 2 * matrixCardH(b.rows) + GAP
         Kind.Month -> 14f + 22f + 18f + monthWeeks(snap) * (24f + b.lanes * 14f) + 10f
         Kind.Timeline -> {
@@ -197,7 +199,7 @@ object WallpaperRenderer {
             when (b.kind) {
                 Kind.YearDots -> yearDots(snap, x, y, w, h)
                 Kind.YearBar -> yearBar(snap, x, y, w, h)
-                Kind.Week -> week(snap, x, y, w, h, b.lanes)
+                Kind.Week -> week(snap, x, y, w, h, b.lanes, b.big)
                 Kind.Matrix -> matrix(snap, x, y, w, b.rows)
                 Kind.Month -> month(snap, x, y, w, h, b.lanes)
                 Kind.Timeline -> timeline(snap, x, y, w, h, b.rows)
@@ -256,17 +258,18 @@ object WallpaperRenderer {
             yearFooter(x, w, by + 8f + 17f, pct, total - passed)
         }
 
-        private fun chip(item: PlanItem, x: Float, y: Float, w: Float, today: LocalDate) {
+        private fun chip(item: PlanItem, x: Float, y: Float, w: Float, today: LocalDate, big: Boolean = false) {
             val color = item.color
+            val ch = if (big) 16.5f else 13f
             fill.color = (color and 0x00FFFFFF) or 0x55000000
-            c.drawRoundRect(RectF(x, y, x + w, y + 13f), 3f, 3f, fill)
+            c.drawRoundRect(RectF(x, y, x + w, y + ch), 3f, 3f, fill)
             fill.color = color
-            c.drawRoundRect(RectF(x, y, x + 2.5f, y + 13f), 1.2f, 1.2f, fill)
+            c.drawRoundRect(RectF(x, y, x + 2.5f, y + ch), 1.2f, 1.2f, fill)
             val label = if (!item.isEvent) "○ ${item.title}" else item.title
-            text(label, x + 5f, y + 6.5f, tp(8.5f, TEXT), maxW = w - 7f)
+            text(label, x + 5f, y + ch / 2, tp(if (big) 9.5f else 8.5f, TEXT), maxW = w - 7f)
         }
 
-        fun week(snap: Snapshot, x: Float, y: Float, w: Float, h: Float, lanes: Int) {
+        fun week(snap: Snapshot, x: Float, y: Float, w: Float, h: Float, lanes: Int, big: Boolean = false) {
             card(x, y, w, h)
             val start = K.startOfWeek(snap.today)
             val colW = (w - 16f) / 7
@@ -285,11 +288,11 @@ object WallpaperRenderer {
                 val items = snap.dayItems(day).filter { it.isEvent || !it.done }
                 var cy = y + 12f + 12f + 5f + 24f + 6f
                 for (it in items.take(lanes)) {
-                    chip(it, x + 8f + colW * i + 1.5f, cy, colW - 3f, snap.today)
-                    cy += 15f
+                    chip(it, x + 8f + colW * i + 1.5f, cy, colW - 3f, snap.today, big)
+                    cy += if (big) 19f else 15f
                 }
                 if (items.size > lanes) {
-                    text("+${items.size - lanes}", cx, cy + 5f, tp(8f, SECONDARY), align = Paint.Align.CENTER)
+                    text("+${items.size - lanes}", cx, cy + 5f, tp(if (big) 9f else 8f, SECONDARY), align = Paint.Align.CENTER)
                 }
             }
         }
